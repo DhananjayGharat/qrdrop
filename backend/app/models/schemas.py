@@ -46,6 +46,7 @@ class SessionCreateRequest(BaseModel):
     publicKey: str
     selectedIp: Optional[str] = None
     preferLocalQr: bool = False
+    clientOrigin: Optional[str] = None
 
 class SessionCreateResponse(BaseModel):
     sessionId: str

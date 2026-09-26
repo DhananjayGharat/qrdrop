@@ -26,7 +26,11 @@ async def create_session(req: SessionCreateRequest, request: Request):
     """Initiates a new receiving session with ephemeral token and real local URL QR payload."""
     try:
         req_port = request.url.port or settings.PORT
-        return session_service.create_session(req, port=req_port)
+        proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        detected_origin = f"{proto}://{host}" if host else None
+        effective_origin = req.clientOrigin or detected_origin
+        return session_service.create_session(req, port=req_port, client_origin=effective_origin)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

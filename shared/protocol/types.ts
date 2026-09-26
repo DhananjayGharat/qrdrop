@@ -99,6 +99,7 @@ export interface SessionCreateRequest {
   publicKey: string;
   selectedIp?: string;
   preferLocalQr?: boolean;
+  clientOrigin?: string;
 }
 
 export interface SessionCreateResponse {

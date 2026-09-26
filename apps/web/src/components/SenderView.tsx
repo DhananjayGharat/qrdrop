@@ -146,7 +146,19 @@ export const SenderView: React.FC<SenderViewProps> = ({ onDone, initialToken }) 
       setPairingPayload(payload);
       setStep('CONNECTED');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Could not connect to receiver. Check if devices are on the same Wi-Fi or hotspot.');
+      let raw = err?.message || '';
+      let friendly = 'Could not connect to receiver. Please check that the receiver QR is active.';
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.detail) {
+          friendly = parsed.detail;
+        }
+      } catch {
+        if (raw && !raw.includes('Failed to fetch')) {
+          friendly = raw;
+        }
+      }
+      setErrorMsg(friendly);
       setStep('SCAN');
     }
   };

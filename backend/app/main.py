@@ -1,5 +1,6 @@
 import os
 import logging
+from typing import Optional
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,40 +73,56 @@ async def health_check():
         "stunServers": settings.stun_server_list,
     }
 
-# Mount Web Client build if it exists
-web_dist = Path(__file__).resolve().parent.parent.parent / "apps" / "web" / "dist"
+# Robust discovery of built Web Client SPA
+def find_web_dist() -> Path:
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / "apps" / "web" / "dist",
+        Path.cwd() / "apps" / "web" / "dist",
+        Path("/app/apps/web/dist"),
+        Path.cwd() / "dist",
+    ]
+    for p in candidates:
+        if p.exists() and (p / "index.html").exists():
+            return p
+    return candidates[0]
 
-@app.get("/connect/{token}")
-async def serve_connect_page(token: str):
-    """
-    Dedicated endpoint for the scanned QR connection URL.
-    Returns the Web Client SPA which auto-connects to the receiver session.
-    """
+web_dist = find_web_dist()
+
+def get_spa_response(token: Optional[str] = None):
     index_file = web_dist / "index.html"
     if index_file.exists():
-        response = FileResponse(index_file)
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        return response
+        resp = FileResponse(index_file)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
     return HTMLResponse(
-        content=f"<html><body><h2>QRDrop Connecting...</h2><p>Token: {token}</p><p>Web client build not found at {web_dist}. Please run npm run build in apps/web.</p></body></html>",
+        content=f"<html><head><title>QRDrop</title></head><body style='font-family:sans-serif;padding:2rem;text-align:center;'>"
+                f"<h2>QRDrop Connecting...</h2>"
+                f"<p>{f'Token: {token}' if token else 'Web client bundle loading...'}</p>"
+                f"<p style='color:#888;'>Web client build not found at {web_dist}. Run 'npm run build' in apps/web.</p>"
+                f"</body></html>",
         status_code=200
     )
 
-if web_dist.exists():
-    if (web_dist / "assets").exists():
-        app.mount("/assets", StaticFiles(directory=str(web_dist / "assets")), name="assets")
+@app.get("/connect")
+@app.get("/connect/{token}")
+@app.get("/connect/{token}/")
+async def serve_connect_page(token: Optional[str] = None):
+    """
+    Dedicated endpoint for scanned QR connection URLs.
+    Returns the Web Client SPA which auto-connects to the receiver session.
+    """
+    return get_spa_response(token)
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        file_path = web_dist / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        index_file = web_dist / "index.html"
-        if index_file.exists():
-            response = FileResponse(index_file)
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            return response
-        return HTMLResponse(content="<h2>QRDrop Web Client Not Found</h2>", status_code=404)
+if (web_dist / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(web_dist / "assets")), name="assets")
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    """Universal SPA static file and fallback handler."""
+    file_path = web_dist / full_path
+    if file_path.is_file():
+        return FileResponse(file_path)
+    return get_spa_response()
 
 if __name__ == "__main__":
     import uvicorn

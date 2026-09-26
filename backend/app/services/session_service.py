@@ -167,7 +167,12 @@ class SessionService:
             self._sessions[sid].state = SessionState.EXPIRED
             del self._sessions[sid]
 
-    def create_session(self, req: SessionCreateRequest, port: Optional[int] = None) -> SessionCreateResponse:
+    def create_session(
+        self,
+        req: SessionCreateRequest,
+        port: Optional[int] = None,
+        client_origin: Optional[str] = None
+    ) -> SessionCreateResponse:
         self.cleanup()
         session_id = str(uuid.uuid4())
         token, expires_at = token_manager.generate_token(session_id, settings.SESSION_TTL_SECONDS)
@@ -198,18 +203,26 @@ class SessionService:
         # Generate ephemeral STUN/TURN credentials for WebRTC fallback
         ice_servers = turn_service.generate_ice_servers(session_id)
 
+        # Resolve effective public base URL
+        effective_public_base = ""
+        # 1. Configured PUBLIC_URL (ignore placeholder https://qrdrop.app)
+        if settings.PUBLIC_URL and not settings.PUBLIC_URL.startswith("https://qrdrop.app"):
+            effective_public_base = settings.PUBLIC_URL.rstrip('/')
+        # 2. Auto-detected origin from incoming browser/proxy request
+        elif client_origin:
+            origin_clean = client_origin.rstrip('/')
+            if not any(lh in origin_clean for lh in ["localhost", "127.0.0.1", "0.0.0.0"]):
+                effective_public_base = origin_clean
+
         # Connection URLs
         lan_connect_url = f"http://{primary_ip}:{active_port}/connect/{token}"
-        if settings.PUBLIC_URL:
-            global_connect_url = f"{settings.PUBLIC_URL.rstrip('/')}/connect/{token}"
-        else:
-            global_connect_url = lan_connect_url
+        global_connect_url = f"{effective_public_base}/connect/{token}" if effective_public_base else lan_connect_url
 
         # Pick primary connect URL for default QR
-        if req.preferLocalQr or not settings.PUBLIC_URL:
-            chosen_qr_url = lan_connect_url
-        else:
+        if effective_public_base and not req.preferLocalQr:
             chosen_qr_url = global_connect_url
+        else:
+            chosen_qr_url = lan_connect_url
 
         endpoints = SessionEndpoints(
             lanUrls=lan_urls,
@@ -217,7 +230,7 @@ class SessionService:
             signalingUrl=signaling_url,
             webrtcEnabled=True,
             iceServers=ice_servers,
-            publicConnectUrl=global_connect_url if settings.PUBLIC_URL else None,
+            publicConnectUrl=global_connect_url if effective_public_base else None,
             lanConnectUrl=lan_connect_url,
         )
 

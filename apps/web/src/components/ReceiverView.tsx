@@ -58,6 +58,8 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [showTroubleshooting, setShowTroubleshooting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [targetQrUrl, setTargetQrUrl] = useState<string>('');
+  const [copied, setCopied] = useState<boolean>(false);
 
   // Transfer metrics
   const [progressPercent, setProgressPercent] = useState<number>(0);
@@ -109,6 +111,12 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
       const deviceId = `receiver-${Math.random().toString(36).substring(2, 9)}`;
       const deviceName = `${navigator.platform.includes('Win') ? 'Windows PC' : navigator.platform.includes('Mac') ? 'MacBook' : 'Desktop'}`;
 
+      const clientOrigin = window.location.origin;
+      const isPublicOrigin = !clientOrigin.includes('localhost') && !clientOrigin.includes('127.0.0.1');
+      if (isPublicOrigin) {
+        setQrMode('GLOBAL');
+      }
+
       const res = await api.createSession({
         receiverDeviceId: deviceId,
         receiverDeviceName: deviceName,
@@ -116,9 +124,14 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
         platform: navigator.userAgent.includes('Mac') ? 'macos' : navigator.userAgent.includes('Win') ? 'windows' : 'linux',
         publicKey: pubKeyHex,
         selectedIp: selectedIp || undefined,
+        clientOrigin,
       });
 
       setSession(res);
+      const initialTarget = (isPublicOrigin || qrMode === 'GLOBAL')
+        ? (res.globalConnectUrl || `${clientOrigin}/connect/${res.token}`)
+        : (res.lanConnectUrl || res.connectUrl || res.qrPayload);
+      setTargetQrUrl(initialTarget || res.qrPayload || '');
       setActiveQrDataUri(res.qrDataUri);
       const activeIp = res.networkInfo?.primaryIp || selectedIp || '';
       if (res.networkInfo) {
@@ -158,12 +171,30 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
   // Dual-mode QR code regeneration on mode change
   useEffect(() => {
     if (!session) return;
-    const targetUrl = (qrMode === 'GLOBAL' && session.globalConnectUrl
-      ? session.globalConnectUrl
-      : (session.lanConnectUrl || session.connectUrl)) || session.qrPayload || '';
+    const origin = window.location.origin;
+    const isPublicOrigin = !origin.includes('localhost') && !origin.includes('127.0.0.1');
 
-    if (targetUrl) {
-      QRCode.toDataURL(targetUrl, { width: 300, margin: 2 })
+    let url = '';
+    if (qrMode === 'GLOBAL') {
+      if (session.globalConnectUrl && !session.globalConnectUrl.includes('qrdrop.app')) {
+        url = session.globalConnectUrl;
+      } else if (isPublicOrigin) {
+        url = `${origin}/connect/${session.token}`;
+      } else {
+        url = session.lanConnectUrl || session.connectUrl || '';
+      }
+    } else {
+      url = session.lanConnectUrl || session.connectUrl || (isPublicOrigin ? `${origin}/connect/${session.token}` : '');
+    }
+
+    if (!url) {
+      url = session.qrPayload || '';
+    }
+
+    setTargetQrUrl(url);
+
+    if (url) {
+      QRCode.toDataURL(url, { width: 300, margin: 2 })
         .then((uri) => setActiveQrDataUri(uri))
         .catch(() => setActiveQrDataUri(session.qrDataUri));
     }
@@ -506,7 +537,7 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
           )}
 
           {/* Dual-Mode QR Toggle (Local Wi-Fi vs Global 24/7) */}
-          {session.globalConnectUrl && session.globalConnectUrl !== session.lanConnectUrl && (
+          {((typeof window !== 'undefined' && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1')) || (session.globalConnectUrl && session.globalConnectUrl !== session.lanConnectUrl)) && (
             <div className="flex items-center justify-center p-1 bg-slate-800/80 rounded-2xl max-w-xs mx-auto border border-slate-700/60 text-xs">
               <button
                 onClick={() => setQrMode('LAN')}
@@ -534,12 +565,34 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
           )}
 
           {/* LARGE HIGH-CONTRAST QR CODE (Requirement 16) */}
-          <div className="relative inline-block p-4 sm:p-5 bg-white rounded-3xl shadow-2xl mx-auto">
-            <img
-              src={activeQrDataUri || session.qrDataUri}
-              alt="QRDrop Connection QR"
-              className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
-            />
+          <div className="space-y-3">
+            <div className="relative inline-block p-4 sm:p-5 bg-white rounded-3xl shadow-2xl mx-auto">
+              <img
+                src={activeQrDataUri || session.qrDataUri}
+                alt="QRDrop Connection QR"
+                className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
+              />
+            </div>
+
+            {/* Scanned Connection URL & Copy Action */}
+            {targetQrUrl && (
+              <div className="flex items-center justify-between gap-2 max-w-xs sm:max-w-sm mx-auto bg-slate-800/80 px-3 py-2 rounded-2xl border border-slate-700/60 text-xs shadow-inner">
+                <span className="truncate font-mono text-slate-300 text-[11px] text-left select-all">
+                  {targetQrUrl}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(targetQrUrl);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shrink-0 text-[11px] transition-colors"
+                >
+                  {copied ? 'Copied! ✓' : 'Copy'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* DEVICE DETECTED CARD (Requirement 17) */}
