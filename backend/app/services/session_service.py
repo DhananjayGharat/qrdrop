@@ -1,3 +1,4 @@
+import os
 import uuid
 import time
 import json
@@ -206,12 +207,13 @@ class SessionService:
         # Resolve effective public base URL
         effective_public_base = ""
         render_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip('/')
+        origin_val = (client_origin or getattr(req, "clientOrigin", None) or "").strip().rstrip('/')
         if render_url:
             effective_public_base = render_url
-        elif client_origin and not any(lh in client_origin for lh in ["localhost", "127.0.0.1", "0.0.0.0"]):
-            effective_public_base = client_origin.strip().rstrip('/')
         elif settings.PUBLIC_URL and not settings.PUBLIC_URL.startswith("https://qrdrop.app"):
             effective_public_base = settings.PUBLIC_URL.strip().rstrip('/')
+        elif origin_val and not any(lh in origin_val for lh in ["localhost", "127.0.0.1", "0.0.0.0", "testserver"]):
+            effective_public_base = origin_val
 
         # Connection URLs
         lan_connect_url = f"http://{primary_ip}:{active_port}/connect/{token}"
