@@ -205,14 +205,13 @@ class SessionService:
 
         # Resolve effective public base URL
         effective_public_base = ""
-        # 1. Configured PUBLIC_URL (ignore placeholder https://qrdrop.app)
-        if settings.PUBLIC_URL and not settings.PUBLIC_URL.startswith("https://qrdrop.app"):
-            effective_public_base = settings.PUBLIC_URL.rstrip('/')
-        # 2. Auto-detected origin from incoming browser/proxy request
-        elif client_origin:
-            origin_clean = client_origin.rstrip('/')
-            if not any(lh in origin_clean for lh in ["localhost", "127.0.0.1", "0.0.0.0"]):
-                effective_public_base = origin_clean
+        render_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip('/')
+        if render_url:
+            effective_public_base = render_url
+        elif client_origin and not any(lh in client_origin for lh in ["localhost", "127.0.0.1", "0.0.0.0"]):
+            effective_public_base = client_origin.strip().rstrip('/')
+        elif settings.PUBLIC_URL and not settings.PUBLIC_URL.startswith("https://qrdrop.app"):
+            effective_public_base = settings.PUBLIC_URL.strip().rstrip('/')
 
         # Connection URLs
         lan_connect_url = f"http://{primary_ip}:{active_port}/connect/{token}"
