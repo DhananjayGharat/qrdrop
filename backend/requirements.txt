@@ -12,3 +12,4 @@ httpx>=0.28.0
 qrcode[pil]>=7.4.2
 psutil>=6.0.0
 requests>=2.32.0
+redis>=5.0.0

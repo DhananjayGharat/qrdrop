@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: qrdrop
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: false
+      - key: REDIS_ENABLED
+        value: "false"
+      - key: STUN_SERVERS
+        value: stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
+      - key: PUBLIC_URL
+        generateValue: false

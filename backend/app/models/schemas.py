@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from backend.app.core.state import SessionState
 
 class DeviceCapabilities(BaseModel):
@@ -15,13 +15,17 @@ class DeviceInfo(BaseModel):
     deviceId: str
     name: str
     platform: str
-    appVersion: str = "1.0.0"
+    appVersion: str = "2.0.0"
     capabilities: DeviceCapabilities = Field(default_factory=DeviceCapabilities)
 
 class SessionEndpoints(BaseModel):
     lanUrls: List[str] = Field(default_factory=list)
     relayUrl: str = ""
+    signalingUrl: str = ""
     webrtcEnabled: bool = True
+    iceServers: List[Dict[str, Any]] = Field(default_factory=list)
+    publicConnectUrl: Optional[str] = None
+    lanConnectUrl: Optional[str] = None
 
 class QRPairingPayload(BaseModel):
     version: str = "QRDTP/1"
@@ -32,6 +36,7 @@ class QRPairingPayload(BaseModel):
     expiresAt: float
     endpoints: SessionEndpoints
     publicKey: str
+    connectUrl: Optional[str] = None
 
 class SessionCreateRequest(BaseModel):
     receiverDeviceId: str
@@ -39,6 +44,8 @@ class SessionCreateRequest(BaseModel):
     destinationPath: str
     platform: str
     publicKey: str
+    selectedIp: Optional[str] = None
+    preferLocalQr: bool = False
 
 class SessionCreateResponse(BaseModel):
     sessionId: str
@@ -48,6 +55,10 @@ class SessionCreateResponse(BaseModel):
     qrDataUri: str
     state: SessionState
     endpoints: SessionEndpoints
+    connectUrl: str = ""
+    lanConnectUrl: str = ""
+    globalConnectUrl: str = ""
+    networkInfo: Optional[Dict[str, Any]] = None
 
 class SessionJoinRequest(BaseModel):
     token: str
@@ -55,6 +66,28 @@ class SessionJoinRequest(BaseModel):
     senderDeviceName: str
     platform: str
     publicKey: str
+    browser: Optional[str] = None
+
+class DeviceDetectRequest(BaseModel):
+    token: str
+    clientPlatform: Optional[str] = None
+    clientDeviceName: Optional[str] = None
+    browser: Optional[str] = None
+
+class TokenLookupResponse(BaseModel):
+    valid: bool
+    sessionId: str
+    receiverDeviceName: str
+    receiverPlatform: str
+    receiverPublicKey: str
+    expiresAt: float
+    state: str
+    protocolVersion: str = "QRDTP/1"
+    networkType: str = "WI-FI"
+    isHotspot: bool = False
+    lanUrls: List[str] = Field(default_factory=list)
+    endpoints: Optional[SessionEndpoints] = None
+    iceServers: List[Dict[str, Any]] = Field(default_factory=list)
 
 class SessionApprovalRequest(BaseModel):
     approved: bool
@@ -119,3 +152,21 @@ class TransferHistoryItem(BaseModel):
     avgSpeedBytesPerSec: float
     status: str  # completed | failed | cancelled
     fileNames: List[str]
+
+class NetworkDiagnosticsResponse(BaseModel):
+    status: str
+    bindHost: str = "0.0.0.0"
+    interfaceName: str
+    primaryIp: str
+    port: int
+    portListening: bool
+    isReachable: bool = False
+    networkType: str
+    isHotspot: bool
+    statusMessage: str
+    protocolVersion: str = "QRDTP/1"
+    firewallStatus: str
+    lanUrl: str = ""
+    healthCheck: Optional[Dict[str, Any]] = None
+    troubleshootingTips: List[str] = Field(default_factory=list)
+    candidateInterfaces: List[Dict[str, Any]] = Field(default_factory=list)

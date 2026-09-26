@@ -5,19 +5,12 @@ from backend.app.networking.signaling import signaling_manager
 
 logger = logging.getLogger("qrdrop.websocket")
 router = APIRouter(prefix="/api/ws", tags=["WebSocket"])
+ws_root_router = APIRouter(prefix="/ws", tags=["WebSocketRoot"])
 
-@router.websocket("/signal/{session_id}")
-async def websocket_signaling_endpoint(
-    websocket: WebSocket,
-    session_id: str,
-    role: str = Query(..., description="'receiver' or 'sender'")
-):
-    """
-    WebSocket endpoint for real-time peer signaling, WebRTC negotiation, and control events.
-    """
+async def handle_signaling(websocket: WebSocket, session_id: str, role: str):
     await signaling_manager.connect(websocket, session_id, role)
     try:
-        # Notify the other peer that this role joined
+        # Notify peer that this role joined
         await signaling_manager.broadcast_to_session(
             session_id,
             {"type": "PEER_CONNECTED", "role": role},
@@ -28,6 +21,13 @@ async def websocket_signaling_endpoint(
             text_data = await websocket.receive_text()
             try:
                 msg = json.loads(text_data)
+                # Normalize WebRTC message types
+                msg_type = msg.get("type", "")
+                if msg_type == "OFFER" and "sdp" in msg:
+                    msg["type"] = "SDP_OFFER"
+                elif msg_type == "ANSWER" and "sdp" in msg:
+                    msg["type"] = "SDP_ANSWER"
+
                 # Forward to peer
                 await signaling_manager.broadcast_to_session(
                     session_id,
@@ -45,6 +45,24 @@ async def websocket_signaling_endpoint(
     except Exception as e:
         logger.error(f"Signaling error for {session_id}: {e}")
         signaling_manager.disconnect(websocket, session_id, role)
+
+@router.websocket("/signal/{session_id}")
+@router.websocket("/signaling/{session_id}")
+async def websocket_signaling_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    role: str = Query("peer", description="'receiver' or 'sender'")
+):
+    await handle_signaling(websocket, session_id, role)
+
+@ws_root_router.websocket("/signaling/{session_id}")
+@ws_root_router.websocket("/signal/{session_id}")
+async def websocket_signaling_root_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    role: str = Query("peer", description="'receiver' or 'sender'")
+):
+    await handle_signaling(websocket, session_id, role)
 
 @router.websocket("/relay/{session_id}")
 async def websocket_relay_endpoint(

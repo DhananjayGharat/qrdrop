@@ -20,9 +20,31 @@ type AppMode = 'HOME' | 'SEND' | 'RECEIVE';
 
 export const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('HOME');
+  const [autoConnectToken, setAutoConnectToken] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
   const [recentTransfers, setRecentTransfers] = useState<TransferHistoryRecord[]>([]);
+
+  // Check URL on load for /connect/<token> or ?token=<token>
+  useEffect(() => {
+    let token: string | null = null;
+    const path = window.location.pathname;
+    if (path.includes('/connect/')) {
+      const parts = path.split('/connect/');
+      if (parts[1]) {
+        token = parts[1].split('/')[0].split('?')[0];
+      }
+    }
+    if (!token) {
+      const params = new URLSearchParams(window.location.search);
+      token = params.get('token') || params.get('connect');
+    }
+
+    if (token) {
+      setAutoConnectToken(token);
+      setMode('SEND');
+    }
+  }, []);
 
   useEffect(() => {
     loadRecentTransfers();
@@ -49,7 +71,13 @@ export const App: React.FC = () => {
     <div className={`min-h-screen flex flex-col ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} transition-colors duration-200`}>
       {/* Header */}
       <Header
-        onGoHome={() => setMode('HOME')}
+        onGoHome={() => {
+          setAutoConnectToken(null);
+          setMode('HOME');
+          if (window.location.pathname.includes('/connect/')) {
+            window.history.replaceState({}, '', '/');
+          }
+        }}
         onOpenHistory={() => setIsHistoryOpen(true)}
         showBack={mode !== 'HOME'}
         darkMode={darkMode}
@@ -67,7 +95,7 @@ export const App: React.FC = () => {
               </h2>
               <p className="text-sm sm:text-base text-slate-400">
                 Universal high-speed file transfer between Desktop, Mobile, and Web browsers.
-                Direct LAN, P2P WebRTC, and E2E Encrypted Relay.
+                Direct local LAN connection — zero cloud storage, zero configuration.
               </p>
             </div>
 
@@ -125,7 +153,7 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Recent Transfers (Requirement 54 & 77) */}
+            {/* Recent Transfers */}
             <div className="max-w-xl mx-auto w-full pt-4">
               <div className="flex items-center justify-between mb-3 px-1">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
@@ -181,7 +209,18 @@ export const App: React.FC = () => {
         )}
 
         {mode === 'RECEIVE' && <ReceiverView onDone={() => setMode('HOME')} />}
-        {mode === 'SEND' && <SenderView onDone={() => setMode('HOME')} />}
+        {mode === 'SEND' && (
+          <SenderView
+            initialToken={autoConnectToken}
+            onDone={() => {
+              setAutoConnectToken(null);
+              setMode('HOME');
+              if (window.location.pathname.includes('/connect/')) {
+                window.history.replaceState({}, '', '/');
+              }
+            }}
+          />
+        )}
       </main>
 
       {/* Footer */}

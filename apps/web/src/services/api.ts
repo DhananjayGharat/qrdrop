@@ -2,6 +2,8 @@ import {
   SessionCreateRequest,
   SessionCreateResponse,
   SessionJoinRequest,
+  TokenLookupResponse,
+  NetworkDiagnostics,
   TransferManifest,
   FileMetadata,
   ChunkAck,
@@ -9,17 +11,38 @@ import {
   TransferHistoryRecord,
 } from '@shared/protocol/types';
 
-const API_BASE = window.location.origin;
+let apiBase = window.location.origin;
+
+export const setApiBase = (url: string) => {
+  apiBase = url.replace(/\/+$/, '');
+};
+
+export const getApiBase = () => apiBase;
 
 export const api = {
-  async getHealth() {
-    const res = await fetch(`${API_BASE}/api/health`);
+  async getBasicHealth() {
+    const res = await fetch(`${apiBase}/health`);
     if (!res.ok) throw new Error('Health check failed');
     return res.json();
   },
 
+  async getHealth() {
+    const res = await fetch(`${apiBase}/api/health`);
+    if (!res.ok) throw new Error('Health check failed');
+    return res.json();
+  },
+
+  async getDiagnostics(selectedIp?: string): Promise<NetworkDiagnostics> {
+    const url = selectedIp 
+      ? `${apiBase}/api/session/diagnostics/network?selected_ip=${encodeURIComponent(selectedIp)}`
+      : `${apiBase}/api/session/diagnostics/network`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Diagnostics check failed');
+    return res.json();
+  },
+
   async createSession(req: SessionCreateRequest): Promise<SessionCreateResponse> {
-    const res = await fetch(`${API_BASE}/api/session/create`, {
+    const res = await fetch(`${apiBase}/api/session/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
@@ -28,8 +51,34 @@ export const api = {
     return res.json();
   },
 
+  async lookupToken(
+    token: string,
+    deviceName?: string,
+    platform?: string,
+    browser?: string
+  ): Promise<TokenLookupResponse> {
+    const params = new URLSearchParams({ token });
+    if (deviceName) params.append('device_name', deviceName);
+    if (platform) params.append('platform', platform);
+    if (browser) params.append('browser', browser);
+
+    const res = await fetch(`${apiBase}/api/session/lookup-token?${params.toString()}`);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async deviceDetect(token: string, clientDeviceName?: string, clientPlatform?: string, browser?: string) {
+    const res = await fetch(`${apiBase}/api/session/device-detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, clientDeviceName, clientPlatform, browser }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async joinSession(sessionId: string, req: SessionJoinRequest) {
-    const res = await fetch(`${API_BASE}/api/session/join?session_id=${encodeURIComponent(sessionId)}`, {
+    const res = await fetch(`${apiBase}/api/session/join?session_id=${encodeURIComponent(sessionId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
@@ -39,13 +88,13 @@ export const api = {
   },
 
   async getSession(sessionId: string) {
-    const res = await fetch(`${API_BASE}/api/session/${encodeURIComponent(sessionId)}`);
+    const res = await fetch(`${apiBase}/api/session/${encodeURIComponent(sessionId)}`);
     if (!res.ok) throw new Error('Session not found');
     return res.json();
   },
 
   async submitManifest(sessionId: string, manifest: TransferManifest) {
-    const res = await fetch(`${API_BASE}/api/session/${encodeURIComponent(sessionId)}/manifest`, {
+    const res = await fetch(`${apiBase}/api/session/${encodeURIComponent(sessionId)}/manifest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(manifest),
@@ -55,7 +104,7 @@ export const api = {
   },
 
   async approveTransfer(sessionId: string, approved: boolean, reason?: string) {
-    const res = await fetch(`${API_BASE}/api/session/${encodeURIComponent(sessionId)}/approve`, {
+    const res = await fetch(`${apiBase}/api/session/${encodeURIComponent(sessionId)}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved, reason }),
@@ -65,7 +114,7 @@ export const api = {
   },
 
   async cancelSession(sessionId: string) {
-    const res = await fetch(`${API_BASE}/api/session/${encodeURIComponent(sessionId)}/cancel`, {
+    const res = await fetch(`${apiBase}/api/session/${encodeURIComponent(sessionId)}/cancel`, {
       method: 'POST',
     });
     if (!res.ok) throw new Error(await res.text());
@@ -73,7 +122,7 @@ export const api = {
   },
 
   async registerFile(sessionId: string, transferId: string, fileMetadata: FileMetadata, conflictMode = 'keep_both') {
-    const res = await fetch(`${API_BASE}/api/transfer/register-file`, {
+    const res = await fetch(`${apiBase}/api/transfer/register-file`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -103,7 +152,7 @@ export const api = {
     if (checksum) formData.append('checksum', checksum);
     formData.append('chunkFile', chunkBlob, 'chunk.bin');
 
-    const res = await fetch(`${API_BASE}/api/transfer/upload-chunk`, {
+    const res = await fetch(`${apiBase}/api/transfer/upload-chunk`, {
       method: 'POST',
       body: formData,
     });
@@ -112,13 +161,13 @@ export const api = {
   },
 
   async getResumeStatus(transferId: string, fileId: string): Promise<ResumeResponse> {
-    const res = await fetch(`${API_BASE}/api/transfer/resume-status/${transferId}/${fileId}`);
+    const res = await fetch(`${apiBase}/api/transfer/resume-status/${transferId}/${fileId}`);
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async finalizeFile(transferId: string, fileId: string) {
-    const res = await fetch(`${API_BASE}/api/transfer/finalize-file`, {
+    const res = await fetch(`${apiBase}/api/transfer/finalize-file`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transferId, fileId }),
@@ -127,14 +176,20 @@ export const api = {
     return res.json();
   },
 
+  async getIceServers(sessionId: string) {
+    const res = await fetch(`${apiBase}/api/session/${encodeURIComponent(sessionId)}/ice-servers`);
+    if (!res.ok) throw new Error('Failed to fetch ICE servers');
+    return res.json();
+  },
+
   async getHistory(): Promise<TransferHistoryRecord[]> {
-    const res = await fetch(`${API_BASE}/api/session/history/list`);
+    const res = await fetch(`${apiBase}/api/session/history/list`);
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async addHistoryRecord(record: any) {
-    await fetch(`${API_BASE}/api/session/history/record`, {
+    await fetch(`${apiBase}/api/session/history/record`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(record),
@@ -142,7 +197,7 @@ export const api = {
   },
 
   async clearHistory() {
-    await fetch(`${API_BASE}/api/session/history/clear`, {
+    await fetch(`${apiBase}/api/session/history/clear`, {
       method: 'DELETE',
     });
   },

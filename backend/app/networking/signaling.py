@@ -1,7 +1,8 @@
 import json
 import logging
-from typing import Dict, Set
+from typing import Dict, Set, Optional, Callable, Awaitable
 from fastapi import WebSocket
+from backend.app.core.redis_store import distributed_store
 
 logger = logging.getLogger("qrdrop.signaling")
 
@@ -11,12 +12,21 @@ class ConnectionManager:
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # session_id -> { "receiver": ws, "sender": ws }
         self.role_connections: Dict[str, Dict[str, WebSocket]] = {}
+        # session_id -> subscriber callback for distributed messages
+        self._distributed_callbacks: Dict[str, Callable[[Dict], Awaitable[None]]] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str, role: str):
         await websocket.accept()
         if session_id not in self.active_connections:
             self.active_connections[session_id] = set()
             self.role_connections[session_id] = {}
+
+            # Register local subscriber for cross-worker message forwarding
+            async def on_dist_signal(msg: dict):
+                await self._dispatch_local(session_id, msg)
+
+            self._distributed_callbacks[session_id] = on_dist_signal
+            distributed_store.register_local_subscriber(session_id, on_dist_signal)
         
         self.active_connections[session_id].add(websocket)
         self.role_connections[session_id][role] = websocket
@@ -27,6 +37,12 @@ class ConnectionManager:
             self.active_connections[session_id].discard(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
+                # Unregister distributed subscriber if no local sockets remain
+                if session_id in self._distributed_callbacks:
+                    distributed_store.unregister_local_subscriber(
+                        session_id, self._distributed_callbacks[session_id]
+                    )
+                    del self._distributed_callbacks[session_id]
         
         if session_id in self.role_connections:
             if self.role_connections[session_id].get(role) == websocket:
@@ -35,8 +51,8 @@ class ConnectionManager:
                 del self.role_connections[session_id]
         logger.info(f"WebSocket disconnected for session {session_id}, role: {role}")
 
-    async def broadcast_to_session(self, session_id: str, message: dict, sender_socket: WebSocket | None = None):
-        """Sends JSON message to other peer in the session."""
+    async def _dispatch_local(self, session_id: str, message: dict, sender_socket: Optional[WebSocket] = None):
+        """Sends JSON message to local sockets for this session."""
         if session_id in self.active_connections:
             msg_str = json.dumps(message)
             for connection in list(self.active_connections[session_id]):
@@ -45,6 +61,17 @@ class ConnectionManager:
                         await connection.send_text(msg_str)
                     except Exception as e:
                         logger.warning(f"Error broadcasting to socket in {session_id}: {e}")
+
+    async def broadcast_to_session(self, session_id: str, message: dict, sender_socket: Optional[WebSocket] = None):
+        """Sends JSON message to peer in the session across both local connections and Redis cluster."""
+        # 1. Local broadcast
+        await self._dispatch_local(session_id, message, sender_socket)
+        
+        # 2. Publish to distributed store for other worker instances
+        try:
+            await distributed_store.publish_signal(session_id, message)
+        except Exception as e:
+            logger.debug(f"Distributed signal publish note: {e}")
 
     async def send_to_role(self, session_id: str, target_role: str, message: dict):
         """Sends JSON message specifically to 'receiver' or 'sender'."""

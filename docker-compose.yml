@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # ------------------------------------------------------------
+  # API Worker 1
+  # ------------------------------------------------------------
+  api-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qrdrop-api-1
+    restart: always
+    environment:
+      - APP_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8000
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost}
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_ENABLED=true
+      - STUN_SERVERS=${STUN_SERVERS:-stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302}
+      - TURN_SERVERS=${TURN_SERVERS:-turn:localhost:3478}
+      - TURN_SECRET=${TURN_SECRET:-qrdrop-ephemeral-turn-secret-key-change-me}
+      - TURN_TTL_SECONDS=86400
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - qrdrop-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # ------------------------------------------------------------
+  # API Worker 2 (Scale out multi-worker node)
+  # ------------------------------------------------------------
+  api-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qrdrop-api-2
+    restart: always
+    environment:
+      - APP_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8000
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost}
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_ENABLED=true
+      - STUN_SERVERS=${STUN_SERVERS:-stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302}
+      - TURN_SERVERS=${TURN_SERVERS:-turn:localhost:3478}
+      - TURN_SECRET=${TURN_SECRET:-qrdrop-ephemeral-turn-secret-key-change-me}
+      - TURN_TTL_SECONDS=86400
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - qrdrop-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # ------------------------------------------------------------
+  # Distributed Cache & Pub/Sub (Redis)
+  # ------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: qrdrop-redis
+    restart: always
+    command: redis-server --appendonly yes --save 60 1
+    volumes:
+      - redis-data:/data
+    networks:
+      - qrdrop-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ------------------------------------------------------------
+  # WebRTC STUN / TURN Relay (Coturn)
+  # ------------------------------------------------------------
+  coturn:
+    image: coturn/coturn:latest
+    container_name: qrdrop-coturn
+    restart: always
+    network_mode: "host" # Coturn requires host network mode to manage dynamic relay UDP port allocation
+    volumes:
+      - ./deploy/turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      - TURN_SECRET=${TURN_SECRET:-qrdrop-ephemeral-turn-secret-key-change-me}
+
+  # ------------------------------------------------------------
+  # Nginx Reverse Proxy & Load Balancer
+  # ------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: qrdrop-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api-1
+      - api-2
+    networks:
+      - qrdrop-net
+
+networks:
+  qrdrop-net:
+    driver: bridge
+
+volumes:
+  redis-data:

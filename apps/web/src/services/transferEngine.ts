@@ -1,6 +1,7 @@
 import { FileMetadata, TransferManifest, TransportType } from '@shared/protocol/types';
 import { api } from './api';
-import { computeSHA256 } from '@shared/crypto/crypto';
+import { computeSHA256, generateUUID } from '@shared/crypto/crypto';
+import { ITransport } from './transports/ITransport';
 
 export interface SelectedItem {
   file: File;
@@ -40,7 +41,7 @@ export class ClientTransferEngine {
     items: SelectedItem[],
     chunkSize = 256 * 1024
   ): Promise<TransferManifest> {
-    const transferId = crypto.randomUUID();
+    const transferId = generateUUID();
     const files: FileMetadata[] = [];
     let totalBytes = 0;
 
@@ -50,7 +51,7 @@ export class ClientTransferEngine {
       totalBytes += file.size;
 
       files.push({
-        fileId: crypto.randomUUID(),
+        fileId: generateUUID(),
         fileName: file.name,
         relativePath: item.relativePath || '',
         fileSize: file.size,
@@ -76,7 +77,8 @@ export class ClientTransferEngine {
     manifest: TransferManifest,
     items: SelectedItem[],
     transport: TransportType,
-    onProgress: (p: ProgressCallbackData) => void
+    onProgress: (p: ProgressCallbackData) => void,
+    transportInstance?: ITransport
   ): Promise<void> {
     this.isCancelled = false;
     this.startTime = Date.now();
@@ -93,8 +95,14 @@ export class ClientTransferEngine {
       const file = item.file;
 
       // 1. Register file with receiver
-      const registerRes = await api.registerFile(sessionId, manifest.transferId, meta);
-      const completedChunksSet = new Set<number>(registerRes.completedChunks || []);
+      let completedChunksSet = new Set<number>();
+      if (transportInstance) {
+        const registerRes = await transportInstance.registerFile(sessionId, manifest.transferId, meta);
+        completedChunksSet = new Set<number>(registerRes.completedChunks || []);
+      } else {
+        const registerRes = await api.registerFile(sessionId, manifest.transferId, meta);
+        completedChunksSet = new Set<number>(registerRes.completedChunks || []);
+      }
 
       // 2. Iterate through chunks
       const chunkSize = meta.chunkSize;
@@ -118,19 +126,10 @@ export class ClientTransferEngine {
         const chunkBuffer = await chunkBlob.arrayBuffer();
         const chunkHash = await computeSHA256(new Uint8Array(chunkBuffer));
 
-        // Upload chunk
-        const ack = await api.uploadChunk(
-          manifest.transferId,
-          meta.fileId,
-          cIdx,
-          offset,
-          chunkBlob,
-          chunkHash
-        );
-
-        if (ack.status === 'CORRUPT') {
-          // Retry chunk once
-          await api.uploadChunk(
+        // Upload chunk via active transport
+        let ack;
+        if (transportInstance) {
+          ack = await transportInstance.sendChunk(
             manifest.transferId,
             meta.fileId,
             cIdx,
@@ -138,6 +137,38 @@ export class ClientTransferEngine {
             chunkBlob,
             chunkHash
           );
+        } else {
+          ack = await api.uploadChunk(
+            manifest.transferId,
+            meta.fileId,
+            cIdx,
+            offset,
+            chunkBlob,
+            chunkHash
+          );
+        }
+
+        if (ack.status === 'CORRUPT') {
+          // Retry chunk once
+          if (transportInstance) {
+            await transportInstance.sendChunk(
+              manifest.transferId,
+              meta.fileId,
+              cIdx,
+              offset,
+              chunkBlob,
+              chunkHash
+            );
+          } else {
+            await api.uploadChunk(
+              manifest.transferId,
+              meta.fileId,
+              cIdx,
+              offset,
+              chunkBlob,
+              chunkHash
+            );
+          }
         }
 
         overallBytesTransferred += chunkLength;
@@ -177,7 +208,11 @@ export class ClientTransferEngine {
       }
 
       // 3. Finalize file: Receiver computes streaming SHA-256 and atomically commits
-      await api.finalizeFile(manifest.transferId, meta.fileId);
+      if (transportInstance) {
+        await transportInstance.finalizeFile(sessionId, manifest.transferId, meta.fileId);
+      } else {
+        await api.finalizeFile(manifest.transferId, meta.fileId);
+      }
     }
   }
 }

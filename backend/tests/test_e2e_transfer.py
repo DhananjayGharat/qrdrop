@@ -152,5 +152,6 @@ def test_full_e2e_transfer_workflow(client, tmp_path):
     client.post("/api/session/history/record", json=hist_record)
     get_hist = client.get("/api/session/history/list")
     assert get_hist.status_code == 200
-    assert len(get_hist.json()) >= 1
-    assert get_hist.json()[0]["remoteDeviceName"] == "Pixel Phone"
+    records = [r for r in get_hist.json() if r.get("transferId") == transfer_id]
+    assert len(records) >= 1
+    assert records[0]["remoteDeviceName"] == "Pixel Phone"

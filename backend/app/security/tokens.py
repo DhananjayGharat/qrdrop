@@ -1,6 +1,6 @@
 import secrets
 import time
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 
 class TokenManager:
     """
@@ -21,6 +21,23 @@ class TokenManager:
         expires_at = time.time() + ttl
         self._tokens[token] = (session_id, expires_at)
         return token, expires_at
+
+    def get_session_for_token(self, token: str) -> Optional[str]:
+        """
+        Looks up session ID for a valid, non-expired, unconsumed token
+        without consuming it.
+        """
+        self.cleanup_expired()
+        if token in self._consumed_tokens:
+            return None
+        record = self._tokens.get(token)
+        if not record:
+            return None
+        session_id, expires_at = record
+        if time.time() > expires_at:
+            del self._tokens[token]
+            return None
+        return session_id
 
     def validate_and_consume(self, token: str, session_id: str) -> bool:
         """
