@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header
-from typing import Optional, List
+from fastapi.responses import FileResponse
+from typing import Optional, List, Dict, Tuple
 from pathlib import Path
 from pydantic import BaseModel
 from backend.app.models.schemas import FileMetadata, ChunkAck, ResumeResponse
@@ -8,6 +9,9 @@ from backend.app.transfer.chunk_engine import transfer_engine, FileIntegrityErro
 from backend.app.security.sanitizer import PathTraversalError
 
 router = APIRouter(prefix="/api/transfer", tags=["Transfer"])
+
+# Track finalized files available for browser download: "transfer_id:file_id" -> (final_path, filename)
+_completed_files: Dict[str, Tuple[Path, str]] = {}
 
 class RegisterFileRequest(BaseModel):
     sessionId: str
@@ -95,15 +99,37 @@ async def finalize_file(req: FinalizeFileRequest):
 
     try:
         verified_hash = await active_transfer.finalize_file()
-        # Clean up memory record for this file
+        final_path = active_transfer.final_path
+        file_name = active_transfer.meta.fileName
+        _completed_files[f"{req.transferId}:{req.fileId}"] = (final_path, file_name)
+        # Clean up memory record for active chunk writing
         transfer_engine.remove_file_transfer(req.transferId, req.fileId)
         return {
             "status": "VERIFIED",
             "fileId": req.fileId,
-            "finalPath": str(active_transfer.final_path),
-            "sha256": verified_hash
+            "finalPath": str(final_path),
+            "sha256": verified_hash,
+            "downloadUrl": f"/api/transfer/download/{req.transferId}/{req.fileId}"
         }
     except FileIntegrityError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/download/{transfer_id}/{file_id}")
+async def download_file(transfer_id: str, file_id: str):
+    """
+    Allows the receiver browser to download the completed file to their local machine.
+    """
+    key = f"{transfer_id}:{file_id}"
+    entry = _completed_files.get(key)
+    if not entry:
+        raise HTTPException(status_code=404, detail="File not found or transfer expired")
+    file_path, file_name = entry
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File no longer exists on server")
+    return FileResponse(
+        path=str(file_path),
+        filename=file_name,
+        media_type="application/octet-stream"
+    )

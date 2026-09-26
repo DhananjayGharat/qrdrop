@@ -19,7 +19,9 @@ import {
   Radio,
   RefreshCw,
   HelpCircle,
-  Globe
+  Globe,
+  Download,
+  FileText
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api } from '../services/api';
@@ -292,6 +294,25 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
     }
   };
 
+  const downloadSingleFile = (transferId: string, fileId: string, fileName: string) => {
+    const downloadUrl = `${api.getApiBase()}/api/transfer/download/${transferId}/${fileId}`;
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const downloadAllFiles = () => {
+    if (!incomingManifest || !incomingManifest.files) return;
+    incomingManifest.files.forEach((f: any, idx: number) => {
+      setTimeout(() => {
+        downloadSingleFile(incomingManifest.transferId, f.fileId, f.fileName);
+      }, idx * 400);
+    });
+  };
+
   const startTransferListener = () => {
     const startTime = Date.now();
     let lastBytes = 0;
@@ -305,6 +326,17 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
           clearInterval(interval);
           setProgressPercent(100);
           setStep('COMPLETE');
+
+          // Auto-trigger browser download for web clients
+          const currentManifest = incomingManifest || s.manifest;
+          if (currentManifest && currentManifest.files) {
+            currentManifest.files.forEach((f: any, idx: number) => {
+              setTimeout(() => {
+                downloadSingleFile(currentManifest.transferId, f.fileId, f.fileName);
+              }, idx * 500);
+            });
+          }
+
           if (incomingManifest) {
             await api.addHistoryRecord({
               id: generateUUID(),
@@ -322,7 +354,8 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
               fileNames: incomingManifest.files.map((f: any) => f.fileName),
             });
           }
-        } else if (s.manifest) {
+        }
+ else if (s.manifest) {
           // Poll chunk progress from receiver engine
           try {
             const resume = await api.getResumeStatus(s.manifest.transferId, s.manifest.files[0]?.fileId);
@@ -934,6 +967,53 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
             </p>
           </div>
 
+          {/* Received Files List with Save/Download Buttons */}
+          <div className="space-y-3 text-left">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+              <span className="flex items-center gap-1.5">
+                <FileCheck className="w-4 h-4 text-emerald-400" />
+                Received Files ({incomingManifest?.files?.length || 0})
+              </span>
+              {(incomingManifest?.files?.length || 0) > 1 && (
+                <button
+                  type="button"
+                  onClick={downloadAllFiles}
+                  className="text-blue-400 hover:text-blue-300 font-bold inline-flex items-center gap-1 transition-colors text-xs"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download All</span>
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+              {incomingManifest?.files?.map((f: any) => (
+                <div
+                  key={f.fileId}
+                  className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3 flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="flex items-center gap-2.5 truncate">
+                    <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="truncate">
+                      <p className="font-semibold text-white truncate">{f.fileName}</p>
+                      <p className="text-[10px] text-slate-400">{formatBytes(f.fileSize)}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => downloadSingleFile(incomingManifest.transferId, f.fileId, f.fileName)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shrink-0 inline-flex items-center gap-1.5 transition-colors text-xs shadow-md shadow-blue-500/20"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Save to PC</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4 text-left space-y-2 text-xs">
             <div className="flex justify-between">
               <span className="text-slate-400">Total Files:</span>
@@ -948,8 +1028,8 @@ export const ReceiverView: React.FC<ReceiverViewProps> = ({ onDone }) => {
               <span className="font-semibold text-emerald-400">✓ SHA-256 Verified</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Saved to:</span>
-              <span className="font-mono text-blue-400 truncate max-w-[200px]">{destinationPath}</span>
+              <span className="text-slate-400">Destination:</span>
+              <span className="font-mono text-blue-400 truncate max-w-[200px]" title={destinationPath}>{destinationPath}</span>
             </div>
           </div>
 

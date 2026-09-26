@@ -156,3 +156,18 @@ async def test_folder_structure_preservation(tmp_path):
     expected_file = Path(dest_dir) / "frontend" / "src" / "components" / "App.tsx"
     assert expected_file.exists()
     assert expected_file.read_bytes() == data
+
+def test_download_finalized_file_endpoint(tmp_path):
+    from fastapi.testclient import TestClient
+    from backend.app.main import app
+    from backend.app.api.transfer_routes import _completed_files
+
+    client = TestClient(app)
+    test_file = tmp_path / "test_download.txt"
+    test_file.write_bytes(b"QRDrop download content")
+    _completed_files["xfer-dl:f-1"] = (test_file, "test_download.txt")
+
+    res = client.get("/api/transfer/download/xfer-dl/f-1")
+    assert res.status_code == 200
+    assert res.content == b"QRDrop download content"
+    assert "test_download.txt" in res.headers.get("content-disposition", "")

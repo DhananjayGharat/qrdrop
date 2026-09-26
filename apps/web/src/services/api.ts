@@ -20,6 +20,7 @@ export const setApiBase = (url: string) => {
 export const getApiBase = () => apiBase;
 
 export const api = {
+  getApiBase: () => apiBase,
   async getBasicHealth() {
     const res = await fetch(`${apiBase}/health`);
     if (!res.ok) throw new Error('Health check failed');
